@@ -1,3 +1,5 @@
+import zlib
+
 from sqlalchemy import TIMESTAMP, Date, Enum, Float, Index, Table, Column, String, text
 from sqlalchemy.dialects.mysql import (
     CHAR,
@@ -13,6 +15,8 @@ from sqlalchemy.dialects.mysql import (
     MEDIUMTEXT,
 )
 from sqlalchemy.ext.declarative import declarative_base
+
+from pol.utils import phpseralize
 
 Base = declarative_base()
 metadata = Base.metadata
@@ -274,11 +278,36 @@ class ChiiRevHistory(Base):
     rev_edit_summary = Column(String(200, "utf8_unicode_ci"), nullable=False)
 
 
+class GzipPHPSerializedBlob(MEDIUMBLOB):
+    def bind_processor(self, dialect):
+        raise NotImplementedError("write to db is not supported now")
+
+    @staticmethod
+    def loads(b: bytes):
+        return phpseralize.loads(zlib.decompress(b, -zlib.MAX_WBITS))
+
+    def result_processor(self, dialect, coltype):
+        loads = self.loads
+
+        def process(value):
+            if value is None:
+                return None
+            return loads(value)
+
+        return process
+
+    def compare_values(self, x, y):
+        if self.comparator:
+            return self.comparator(x, y)
+        else:
+            return x == y
+
+
 class ChiiRevText(Base):
     __tablename__ = "chii_rev_text"
 
     rev_text_id = Column(MEDIUMINT(9), primary_key=True)
-    rev_text = Column(MEDIUMBLOB, nullable=False)
+    rev_text = Column(GzipPHPSerializedBlob, nullable=False)
 
 
 t_chii_subject_alias = Table(
